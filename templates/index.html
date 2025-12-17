@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>내 가계부</title>
+
+    <!-- TailwindCSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FullCalendar -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/main.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<div class="max-w-6xl mx-auto p-4 md:p-8">
+    <h1 class="text-2xl md:text-3xl font-bold mb-6">내 캘린더 가계부</h1>
+
+    <!-- 메인 레이아웃 -->
+    <div class="flex flex-col gap-6 md:grid md:grid-cols-3 md:gap-8">
+
+        <!-- 왼쪽: 요약 -->
+        <div class="bg-white p-5 md:p-6 rounded-xl shadow col-span-1">
+            <h2 class="text-xl font-bold mb-4">요약</h2>
+
+            <p class="text-lg">총 수입:
+                <b class="text-green-700">{{ income }}</b> 원
+            </p>
+            <p class="text-lg">총 지출:
+                <b class="text-red-700">{{ expense }}</b> 원
+            </p>
+
+            {% set balance = income - expense %}
+            <p class="text-lg mt-4">잔액:</p>
+            {% if balance >= 0 %}
+                <b class="text-green-600 text-2xl">{{ balance }} 원</b>
+            {% else %}
+                <b class="text-red-600 text-2xl">{{ balance }} 원</b>
+            {% endif %}
+
+            <div class="mt-6 text-sm text-gray-500 space-y-1">
+                <p>📌 달력에서 날짜를 클릭해 수입/지출을 입력하세요.</p>
+                <p>📌 카테고리로 지출 패턴을 분석할 수 있습니다.</p>
+            </div>
+        </div>
+
+        <!-- 오른쪽: 캘린더 -->
+        <div class="bg-white p-4 md:p-6 rounded-xl shadow col-span-2">
+            <h2 class="text-xl font-bold mb-4">캘린더</h2>
+            <div id="calendar" class="z-0"></div>
+        </div>
+    </div>
+
+    <!-- 0) 월별 수입/지출 그래프 -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4">월별 통계 (수입 vs 지출)</h2>
+        <div class="h-64 md:h-80">
+            <canvas id="monthlyChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 1) 누적 잔액 그래프 -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4">누적 잔액 그래프</h2>
+        <div class="h-64 md:h-80">
+            <canvas id="cumulativeChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 2) 차익 막대 그래프 -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4">차익 (수입 - 지출) 그래프</h2>
+        <div class="h-64 md:h-80">
+            <canvas id="profitChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 3) 카테고리별 지출 통계 (파이 차트) -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4">카테고리별 지출 비율</h2>
+        <div class="h-64 md:h-80">
+            <canvas id="categoryPieChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 4) 지출 상위 TOP 5 카테고리 -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4">지출 상위 TOP 5 카테고리</h2>
+        <div class="h-64 md:h-80">
+            <canvas id="topCategoryChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 5) 이번 달 목표 대비 지출 현황 -->
+    <div class="mt-8 bg-white p-4 md:p-6 rounded-xl shadow">
+        <h2 class="text-xl font-bold mb-4 flex flex-col gap-2 md:flex-row md:justify-between md:items-center">
+            <span>이번 달 목표 대비 지출 현황</span>
+
+            <div class="flex items-center gap-2 text-sm">
+                <label>목표 지출: </label>
+                <input id="monthlyGoalInput"
+                       type="number"
+                       class="border p-1 rounded w-28 text-right"
+                       placeholder="예: 1000000">
+                <button onclick="updateMonthlyGoal()"
+                        class="px-3 py-1 bg-blue-600 text-white rounded">
+                    적용
+                </button>
+            </div>
+        </h2>
+
+        <!-- Progress bar -->
+        <div class="mt-4 w-full bg-gray-200 rounded-full h-4">
+            <div id="goalProgressBar"
+                 class="bg-blue-500 h-4 rounded-full"
+                 style="width: 0%;">
+            </div>
+        </div>
+
+        <!-- 값 표시 -->
+        <p class="mt-2 text-sm text-gray-600">
+            <span id="currentExpenseValue">현재 지출: 0원</span> /
+            <span id="goalValue">목표 지출: 0원</span>
+        </p>
+
+        <!-- 막대 차트 -->
+        <div class="mt-4 h-64 md:h-80">
+            <canvas id="goalChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- 모달: 수입/지출 입력 + 해당 날짜 내역 -->
+<div id="modal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center hidden z-50">
+    <div class="bg-white p-5 md:p-6 rounded-xl shadow-xl w-11/12 max-w-md z-60 relative">
+        <h3 class="text-lg font-bold mb-2">수입 / 지출 입력</h3>
+        <p class="mb-3 text-gray-600 text-sm" id="modal-date-text"></p>
+
+        <form id="dataForm" method="post" action="/add" class="space-y-3">
+            <input type="hidden" name="date" id="modal-date">
+
+            <!-- 유형 -->
+            <div>
+                <label class="block text-sm mb-1">유형</label>
+                <select name="type" class="border rounded p-2 w-full text-sm">
+                    <option value="income">수입</option>
+                    <option value="expense">지출</option>
+                </select>
+            </div>
+
+            <!-- 카테고리 -->
+            <div>
+                <label class="block text-sm mb-1">카테고리</label>
+                <select name="category" class="border rounded p-2 w-full text-sm">
+                    <option value="월급">월급</option>
+                    <option value="식비">식비</option>
+                    <option value="교통">교통</option>
+                    <option value="주거">주거</option>
+                    <option value="취미">취미</option>
+                    <option value="기타" selected>기타</option>
+                </select>
+            </div>
+
+            <!-- 항목 이름 -->
+            <div>
+                <label class="block text-sm mb-1">항목 이름</label>
+                <input type="text" name="title" class="border rounded p-2 w-full text-sm" placeholder="예: 점심 식사" required>
+            </div>
+
+            <!-- 금액 -->
+            <div>
+                <label class="block text-sm mb-1">금액</label>
+                <input type="number" name="amount" class="border rounded p-2 w-full text-sm" placeholder="예: 12000" required>
+            </div>
+
+            <!-- 버튼 -->
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button"
+                        onclick="closeModal()"
+                        class="px-3 py-1 rounded bg-gray-300 text-sm">
+                    취소
+                </button>
+                <button type="submit"
+                        class="px-3 py-1 rounded bg-blue-600 text-white text-sm">
+                    저장
+                </button>
+            </div>
+        </form>
+
+        <!-- 해당 날짜의 내역 리스트 -->
+        <div class="mt-4 border-t pt-3 max-h-48 overflow-y-auto text-sm">
+            <h4 class="font-semibold mb-2">해당 날짜 내역</h4>
+            <div id="record-list" class="space-y-1 text-xs md:text-sm text-gray-700">
+                <!-- JS로 채워짐 -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let calendar;
+let selectedDate;
+
+// ===== 모달 제어 및 날짜별 내역 =====
+function openModal(dateStr) {
+    selectedDate = dateStr;
+    document.getElementById("modal-date").value = dateStr;
+    document.getElementById("modal-date-text").innerText = "선택한 날짜: " + dateStr;
+    document.getElementById("modal").classList.remove("hidden");
+    loadRecordsForDate(dateStr);
+}
+
+function closeModal() {
+    document.getElementById("modal").classList.add("hidden");
+}
+
+async function loadRecordsForDate(dateStr) {
+    try {
+        const res = await fetch(`/records?date=${encodeURIComponent(dateStr)}`);
+        const data = await res.json();
+        const listEl = document.getElementById("record-list");
+        listEl.innerHTML = "";
+
+        if (!data || data.length === 0) {
+            listEl.innerHTML = "<p class='text-gray-400'>내역이 없습니다.</p>";
+            return;
+        }
+
+        data.forEach(r => {
+            const sign = r.type === "income" ? "+" : "-";
+            const color = r.type === "income" ? "text-green-700" : "text-red-700";
+
+            const div = document.createElement("div");
+            div.className = "flex justify-between items-center";
+            div.innerHTML = `
+                <div>
+                    <span class="${color} font-semibold">${sign}${Number(r.amount).toLocaleString()}원</span>
+                    <span class="ml-2">${r.title}</span>
+                    <span class="ml-1 text-gray-400">(${r.category || "카테고리 없음"})</span>
+                </div>
+            `;
+            listEl.appendChild(div);
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// ===== 달력 날짜별 합계 표시 =====
+async function loadCalendarEvents() {
+    try {
+        const res = await fetch("/records/all");
+        const data = await res.json();
+
+        const map = {}; // {date: {income, expense}}
+        data.forEach(r => {
+            if (!map[r.date]) map[r.date] = {income: 0, expense: 0};
+            if (r.type === "income") map[r.date].income += Number(r.amount);
+            else if (r.type === "expense") map[r.date].expense += Number(r.amount);
+        });
+
+        const events = Object.keys(map).map(date => {
+            const income = map[date].income;
+            const expense = map[date].expense;
+            const net = income - expense;
+
+            const titleParts = [];
+            if (income > 0) titleParts.push(`+${income.toLocaleString()}원`);
+            if (expense > 0) titleParts.push(`-${expense.toLocaleString()}원`);
+
+            return {
+                title: titleParts.join(" / "),
+                start: date,
+                allDay: true,
+                display: "block",
+                backgroundColor: net >= 0 ? "#bbf7d0" : "#fecaca",
+                borderColor: net >= 0 ? "#16a34a" : "#dc2626"
+            };
+        });
+
+        calendar.removeAllEvents();
+        calendar.addEventSource(events);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// ===== 차트 공통 데이터 로드: 월별 통계 =====
+let monthlyChart, cumulativeChart, profitChart;
+let categoryPieChart, topCategoryChart, goalChart;
+let monthlyGoal = 0;
+
+// 0) 월별 수입/지출 차트
+async function loadMonthlyChart() {
+    try {
+        const res = await fetch("/stats/monthly");
+        const data = await res.json();
+
+        const labels = data.map(d => d.month);
+        const incomes = data.map(d => d.income || 0);
+        const expenses = data.map(d => d.expense || 0);
+
+        const ctx = document.getElementById("monthlyChart").getContext("2d");
+        if (monthlyChart) monthlyChart.destroy();
+
+        monthlyChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "수입",
+                        data: incomes,
+                        backgroundColor: "rgba(34, 197, 94, 0.6)"
+                    },
+                    {
+                        label: "지출",
+                        data: expenses,
+                        backgroundColor: "rgba(248, 113, 113, 0.7)"
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: v => v.toLocaleString() + "원"
+                        }
+                    }
+                }
+            }
+        });
+
+        // 누적/차익 차트는 같은 데이터로 계산
+        loadCumulativeChartFrom(data);
+        loadProfitChartFrom(data);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// 1) 누적 잔액 그래프
+function loadCumulativeChartFrom(data) {
+    const labels = data.map(d => d.month);
+    const incomes = data.map(d => d.income || 0);
+    const expenses = data.map(d => d.expense || 0);
+
+    const cumulative = [];
+    let balance = 0;
+    for (let i = 0; i < labels.length; i++) {
+        balance += incomes[i] - expenses[i];
+        cumulative.push(balance);
+    }
+
+    const ctx = document.getElementById("cumulativeChart").getContext("2d");
+    if (cumulativeChart) cumulativeChart.destroy();
+
+    cumulativeChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels,
+            datasets: [{
+                label: "누적 잔액",
+                data: cumulative,
+                borderColor: "rgba(59,130,246,1)",
+                backgroundColor: "rgba(59,130,246,0.3)",
+                fill: true,
+                tension: 0.25,
+                borderWidth: 3
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+}
+
+// 2) 차익 막대 그래프
+function loadProfitChartFrom(data) {
+    const labels = data.map(d => d.month);
+    const profits = data.map(d => (d.income || 0) - (d.expense || 0));
+    const colors = profits.map(v => v >= 0 ? "rgba(34,197,94,0.7)" : "rgba(248,113,113,0.7)");
+
+    const ctx = document.getElementById("profitChart").getContext("2d");
+    if (profitChart) profitChart.destroy();
+
+    profitChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels,
+            datasets: [{
+                label: "차익 (수입 - 지출)",
+                data: profits,
+                backgroundColor: colors
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+}
+
+// 3) 카테고리 파이 차트
+async function loadCategoryPieChart() {
+    try {
+        const res = await fetch("/stats/categories");
+        const data = await res.json();
+
+        const labels = data.map(d => d.category);
+        const totals = data.map(d => d.total);
+
+        const ctx = document.getElementById("categoryPieChart").getContext("2d");
+        if (categoryPieChart) categoryPieChart.destroy();
+
+        categoryPieChart = new Chart(ctx, {
+            type: "pie",
+            data: {
+                labels,
+                datasets: [{
+                    data: totals,
+                    backgroundColor: [
+                        "#60a5fa", "#34d399", "#f87171",
+                        "#fbbf24", "#a78bfa", "#f472b6"
+                    ]
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// 4) TOP 5 카테고리
+async function loadTopCategoryChart() {
+    try {
+        const res = await fetch("/stats/categories");
+        const data = await res.json();
+
+        const sorted = data.sort((a, b) => b.total - a.total).slice(0, 5);
+        const labels = sorted.map(d => d.category);
+        const totals = sorted.map(d => d.total);
+
+        const ctx = document.getElementById("topCategoryChart").getContext("2d");
+        if (topCategoryChart) topCategoryChart.destroy();
+
+        topCategoryChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [{
+                    label: "지출 금액",
+                    data: totals,
+                    backgroundColor: "rgba(248,113,113,0.7)"
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// 5) 목표 대비 실적
+function updateMonthlyGoal() {
+    const v = document.getElementById("monthlyGoalInput").value.trim();
+    if (!v || isNaN(v)) return;
+    monthlyGoal = Number(v);
+    document.getElementById("goalValue").innerText = `목표 지출: ${monthlyGoal.toLocaleString()}원`;
+    loadGoalChart();
+}
+
+async function loadGoalChart() {
+    try {
+        const res = await fetch("/stats/current_month");
+        const data = await res.json();
+        const totalExpense = data.total_expense || 0;
+
+        document.getElementById("currentExpenseValue").innerText =
+            `현재 지출: ${totalExpense.toLocaleString()}원`;
+
+        let ratio = 0;
+        if (monthlyGoal > 0) {
+            ratio = Math.min((totalExpense / monthlyGoal) * 100, 100);
+        }
+        document.getElementById("goalProgressBar").style.width = ratio + "%";
+
+        const ctx = document.getElementById("goalChart").getContext("2d");
+        if (goalChart) goalChart.destroy();
+
+        goalChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: ["목표 지출", "현재 지출"],
+                datasets: [{
+                    data: [monthlyGoal, totalExpense],
+                    backgroundColor: [
+                        "rgba(96,165,250,0.7)",
+                        "rgba(239,68,68,0.7)"
+                    ]
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// ===== 페이지 로드 시 초기화 =====
+document.addEventListener("DOMContentLoaded", function () {
+    const calendarEl = document.getElementById("calendar");
+
+    calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: "dayGridMonth",
+        height: 600,
+        locale: "ko",
+        headerToolbar: {
+            left: "prev,next today",
+            center: "title",
+            right: ""
+        },
+        dateClick: function (info) {
+            openModal(info.dateStr);
+        }
+    });
+
+    calendar.render();
+
+    // 초기 데이터 로드
+    loadCalendarEvents();
+    loadMonthlyChart();
+    loadCategoryPieChart();
+    loadTopCategoryChart();
+    loadGoalChart();
+});
+</script>
+
+</body>
+</html>
