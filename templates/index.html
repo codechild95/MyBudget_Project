@@ -45,6 +45,49 @@
                 <p>📌 달력에서 날짜를 클릭해 수입/지출을 입력하세요.</p>
                 <p>📌 카테고리로 지출 패턴을 분석할 수 있습니다.</p>
             </div>
+
+            <!-- 💬 가계부 경제 Agent -->
+            <div class="mt-6 border-t pt-4">
+                <h3 class="text-base font-semibold mb-2 flex items-center gap-1">
+                    <span>💬 가계부 경제 Agent</span>
+                </h3>
+                <div class="text-xs text-gray-500 mb-2">
+                    가계부 데이터를 바탕으로 소비 패턴 분석, 절약 방향, 예산 조언을 해줄 수 있습니다.
+                    예) “이번 달 식비 많이 썼어?”, “어디서 줄이는 게 좋을까?”
+                </div>
+
+                <div class="border rounded-xl h-64 flex flex-col bg-gray-50">
+                    <div id="agent-messages" class="flex-1 overflow-y-auto p-2 text-xs space-y-2">
+                        <!-- 초기 안내 메시지 -->
+                        <div class="bg-white rounded-lg px-2 py-1 shadow-sm text-gray-700">
+                            🤖 이번 달 지출이나 카테고리별 소비가 궁금하면 아래처럼 물어봐 주세요.<br>
+                            <span class="text-gray-500">예) "이번 달 지출 패턴 알려줘"</span>
+                        </div>
+                    </div>
+                    <div class="border-t p-2 flex gap-2">
+                        <input id="agent-input"
+                               class="flex-1 border rounded px-2 py-1 text-xs"
+                               placeholder="예: 이번 달 지출 패턴 분석해줘">
+                        <button id="agent-send"
+                                class="px-3 py-1 bg-blue-600 text-white rounded text-xs">
+                            전송
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 연도별 / 월별 요약 -->
+            <div class="mt-6 border-t pt-4">
+                <h3 class="font-semibold mb-2 text-sm">연도별 / 월별 수입·지출 요약</h3>
+                <select id="yearSelect"
+                        class="border p-1 rounded text-xs"
+                        onchange="updateYearSummary()">
+                </select>
+                <div id="yearSummary"
+                     class="mt-3 text-xs text-gray-700 space-y-1">
+                    연도를 선택하세요.
+                </div>
+            </div>
         </div>
 
         <!-- 오른쪽: 캘린더 -->
@@ -217,6 +260,7 @@ function closeModal() {
     document.getElementById("modal").classList.add("hidden");
 }
 
+// 날짜별 내역 + 삭제 버튼
 async function loadRecordsForDate(dateStr) {
     try {
         const res = await fetch(`/records?date=${encodeURIComponent(dateStr)}`);
@@ -235,17 +279,46 @@ async function loadRecordsForDate(dateStr) {
 
             const div = document.createElement("div");
             div.className = "flex justify-between items-center";
+
             div.innerHTML = `
                 <div>
                     <span class="${color} font-semibold">${sign}${Number(r.amount).toLocaleString()}원</span>
                     <span class="ml-2">${r.title}</span>
                     <span class="ml-1 text-gray-400">(${r.category || "카테고리 없음"})</span>
                 </div>
+                <button onclick="deleteRecord(${r.id})"
+                        class="text-xs text-red-600 hover:underline ml-2">
+                    삭제
+                </button>
             `;
             listEl.appendChild(div);
         });
     } catch (e) {
         console.error(e);
+    }
+}
+
+// ===== 삭제 기능 =====
+async function deleteRecord(id) {
+    if (!confirm("정말 삭제할까요?")) return;
+    try {
+        const res = await fetch(`/records/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+            alert("삭제 실패");
+            return;
+        }
+        // 다시 로딩
+        await loadCalendarEvents();
+        if (selectedDate) {
+            await loadRecordsForDate(selectedDate);
+        }
+        await loadMonthlyChart();
+        await loadCategoryPieChart();
+        await loadTopCategoryChart();
+        await loadGoalChart();
+    } catch (e) {
+        console.error(e);
+        alert("삭제 중 오류가 발생했습니다.");
     }
 }
 
@@ -509,6 +582,118 @@ async function loadGoalChart() {
     }
 }
 
+// ===== 연도 선택용 요약 =====
+async function loadYearOptions() {
+    try {
+        const res = await fetch("/stats/monthly");
+        const data = await res.json();
+
+        const years = [...new Set(data.map(d => d.month.substring(0, 4)))];
+
+        const sel = document.getElementById("yearSelect");
+        sel.innerHTML = "<option value=''>연도 선택</option>";
+
+        years.forEach(y => {
+            const opt = document.createElement("option");
+            opt.value = y;
+            opt.innerText = y + "년";
+            sel.appendChild(opt);
+        });
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function updateYearSummary() {
+    const year = document.getElementById("yearSelect").value;
+    const box = document.getElementById("yearSummary");
+
+    if (!year) {
+        box.innerHTML = "연도를 선택하세요.";
+        return;
+    }
+
+    const res = await fetch("/stats/monthly");
+    const data = await res.json();
+
+    const months = data.filter(d => d.month.startsWith(year));
+
+    if (months.length === 0) {
+        box.innerHTML = "데이터가 없습니다.";
+        return;
+    }
+
+    let html = "<div class='space-y-1'>";
+    months.forEach(m => {
+        html += `
+            <div>
+                <span class="font-semibold">${m.month}</span>
+                <span class="ml-2 text-green-700">+${(m.income || 0).toLocaleString()}원</span>
+                <span class="ml-2 text-red-700">-${(m.expense || 0).toLocaleString()}원</span>
+            </div>
+        `;
+    });
+    html += "</div>";
+
+    box.innerHTML = html;
+}
+
+// ===== 가계부 경제 Agent =====
+let agentHistory = [];
+
+function appendAgentMessage(role, text) {
+    const box = document.getElementById("agent-messages");
+    const div = document.createElement("div");
+    div.className = "max-w-full";
+
+    if (role === "user") {
+        div.innerHTML = `
+            <div class="bg-blue-500 text-white rounded-lg px-2 py-1 ml-auto text-right inline-block">
+                ${text}
+            </div>
+        `;
+        div.classList.add("flex", "justify-end");
+    } else {
+        div.innerHTML = `
+            <div class="bg-white text-gray-800 rounded-lg px-2 py-1 inline-block shadow-sm">
+                ${text}
+            </div>
+        `;
+        div.classList.add("flex", "justify-start");
+    }
+
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+}
+
+async function sendAgentMessage() {
+    const input = document.getElementById("agent-input");
+    const msg = input.value.trim();
+    if (!msg) return;
+
+    appendAgentMessage("user", msg);
+    agentHistory.push({ role: "user", content: msg });
+    input.value = "";
+
+    try {
+        const res = await fetch("/agent/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: msg,
+                history: agentHistory
+            })
+        });
+        const data = await res.json();
+        const reply = data.reply || "응답을 가져오지 못했어요.";
+        appendAgentMessage("assistant", reply);
+        agentHistory.push({ role: "assistant", content: reply });
+    } catch (e) {
+        console.error(e);
+        appendAgentMessage("assistant", "서버 오류가 발생했어요. 잠시 후 다시 시도해줘.");
+    }
+}
+
 // ===== 페이지 로드 시 초기화 =====
 document.addEventListener("DOMContentLoaded", function () {
     const calendarEl = document.getElementById("calendar");
@@ -535,6 +720,16 @@ document.addEventListener("DOMContentLoaded", function () {
     loadCategoryPieChart();
     loadTopCategoryChart();
     loadGoalChart();
+    loadYearOptions();
+
+    // Agent 버튼 이벤트
+    document.getElementById("agent-send").addEventListener("click", sendAgentMessage);
+    document.getElementById("agent-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            sendAgentMessage();
+        }
+    });
 });
 </script>
 
