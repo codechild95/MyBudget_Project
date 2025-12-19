@@ -72,7 +72,23 @@
                         예: "이번 달 식비 많이 썼어?", "어디서 줄이는 게 좋을까?"
                     </div>
                 </div>
+            <!-- 🔐 OpenAI API Key 설정 -->
+            <div class="mt-6 border-t pt-4">
+                <h3 class="text-sm font-bold mb-2">🔐 OpenAI API Key 설정</h3>
 
+            <div class="flex gap-2 text-sm">
+                <input id="openai-key-input"
+                    type="password"
+                    class="flex-1 border rounded px-2 py-1"
+                    placeholder="sk-로 시작하는 API Key">
+                <button onclick="saveOpenAIKey()"
+                        class="px-3 py-1 bg-gray-700 text-white rounded">
+                    저장
+                </button>
+            </div>
+
+    <p id="key-status" class="text-xs text-gray-500 mt-1"></p>
+</div>        
                 <!-- 입력 폼 -->
                 <form id="agent-form" class="mt-3 flex gap-2 text-sm">
                     <input id="agent-input"
@@ -86,7 +102,7 @@
                 </form>
             </div>
         </div>
-
+            
         <!-- ========== 오른쪽: 캘린더 ========== -->
         <div class="col-span-1 md:col-span-2 bg-white p-4 md:p-6 rounded-xl shadow">
             <h2 class="text-xl font-bold mb-4">캘린더</h2>
@@ -797,6 +813,39 @@ document.addEventListener("DOMContentLoaded", function () {
     loadTopCategoryChart();
     loadGoalChart();
 });
+
+async function saveOpenAIKey() {
+    const input = document.getElementById("openai-key-input");
+    const status = document.getElementById("key-status");
+    const key = input.value.trim();
+
+    if (!key.startsWith("sk-")) {
+        status.innerText = "❌ 올바른 OpenAI API Key 형식이 아닙니다.";
+        status.className = "text-xs text-red-500";
+        return;
+    }
+
+    try {
+        const res = await fetch("/settings/openai-key", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: key })
+        });
+
+        if (res.ok) {
+            input.value = "";
+            status.innerText = "✅ API Key가 안전하게 저장되었습니다.";
+            status.className = "text-xs text-green-600";
+        } else {
+            throw new Error();
+        }
+    } catch {
+        status.innerText = "❌ 저장 실패. 서버 상태를 확인하세요.";
+        status.className = "text-xs text-red-500";
+    }
+}
+
+
 </script>
 
 </body>
